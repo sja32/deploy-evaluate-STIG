@@ -1,0 +1,6 @@
+---
+- name: Deploy Evaluate-STIG
+  hosts: all
+  become: true
+  roles:
+    - role: deploy_evaluate_stig
