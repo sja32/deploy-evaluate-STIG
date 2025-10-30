@@ -1,0 +1,9 @@
+---
+# Default values for deploy_evaluate_stig role
+
+src_share: "\\\\192.168.40.42\\raw-images\\Evaluate-STIG"
+dest_root: "C:\\ProgramData"
+dest_path: "{{ dest_root }}\\Evaluate-STIG"
+copy_log: "C:\\Windows\\Temp\\evaluate_stig_copy_{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}.log"
+smb_user: ""
+smb_pass: ""
