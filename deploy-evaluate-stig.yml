@@ -1,0 +1,18 @@
+---
+# Playbook: deploy-evaluate-stig.yml
+# Purpose: Deploy Evaluate-STIG files to Windows endpoints
+
+- name: Deploy Evaluate-STIG to ProgramData
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Ensure destination path exists
+      win_file:
+        path: C:\ProgramData\Evaluate-STIG
+        state: directory
+
+    - name: Copy Evaluate-STIG using PowerShell Copy-Item
+      win_shell: |
+        Copy-Item -Path "\\192.168.10.200\shared\evaluate-stig\*" -Destination "C:\ProgramData\Evaluate-STIG" -Recurse -Force -Credential (New-Object System.Management.Automation.PSCredential('{{ smb_user }}',(ConvertTo-SecureString '{{ smb_pass }}' -AsPlainText -Force)))
+      args:
+        executable: powershell.exe
