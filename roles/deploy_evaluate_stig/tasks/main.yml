@@ -3,7 +3,7 @@
 # Role: deploy_evaluate_stig
 # Purpose: Copy or update the Evaluate-STIG folder from network share
 #          to C:\ProgramData using PowerShell with LastWriteTime,
-#          file count, and total size comparison.
+#          file count, size comparison, and hostname-based log file.
 # ===================================================================
 
 - name: Ensure destination root (ProgramData) exists
@@ -19,10 +19,11 @@
     $destPath = Join-Path $destRoot $folderName
     $user = '{{ smb_user }}'
     $pass = '{{ smb_pass }}'
-    $log = '{{ copy_log }}'
-    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $hostname = $env:COMPUTERNAME
+    $timestamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
+    $log = "C:\Windows\Temp\evaluate_stig_copy_${hostname}_$timestamp.log"
 
-    Add-Content $log "$timestamp - Starting Evaluate-STIG folder verification."
+    Add-Content $log "$timestamp - [$hostname] Starting Evaluate-STIG folder verification."
 
     # Map the network share with credentials
     net use $src /user:$user $pass | Out-Null
@@ -53,22 +54,22 @@
         $destSizeMB = 0
     }
 
-    Add-Content $log "$timestamp - Source: $($srcFiles.Count) files, $srcSizeMB MB, last modified $srcTime"
-    Add-Content $log "$timestamp - Destination: $($destFiles.Count) files, $destSizeMB MB, last modified $destTime"
+    Add-Content $log "$timestamp - [$hostname] Source: $($srcFiles.Count) files, $srcSizeMB MB, last modified $srcTime"
+    Add-Content $log "$timestamp - [$hostname] Destination: $($destFiles.Count) files, $destSizeMB MB, last modified $destTime"
 
-    # Decide whether to copy
+    # Decision logic
     $action = 'skip'
 
     if (-not (Test-Path $destPath)) {
         $action = 'copy'
-        Write-Output "$timestamp - Destination missing. Copying new version..."
+        Write-Output "$timestamp - [$hostname] Destination missing. Copying new version..."
     }
     elseif ($srcTime -gt $destTime -or $srcFiles.Count -ne $destFiles.Count -or ($srcSizeMB -ne $destSizeMB)) {
         $action = 'copy'
-        Write-Output "$timestamp - Detected newer or mismatched source. Replacing destination..."
+        Write-Output "$timestamp - [$hostname] Detected newer or mismatched source. Replacing destination..."
     }
     else {
-        Write-Output "$timestamp - Evaluate-STIG is up-to-date. Skipping copy."
+        Write-Output "$timestamp - [$hostname] Evaluate-STIG is up-to-date. Skipping copy."
     }
 
     if ($action -eq 'copy') {
@@ -83,7 +84,7 @@
         $folderToCopy = Split-Path $src -Leaf
         $copyTarget = $destRoot
 
-        Add-Content $log "$timestamp - Copying folder $folderToCopy to $copyTarget..."
+        Add-Content $log "$timestamp - [$hostname] Copying folder $folderToCopy to $copyTarget..."
         Copy-Item -Path (Join-Path $sourceParent $folderToCopy) `
                   -Destination $copyTarget `
                   -Recurse -Force -ErrorAction Stop
@@ -91,13 +92,14 @@
         $newCount = (Get-ChildItem -Path $destPath -Recurse -Force | Measure-Object).Count
         $newSize = [math]::Round(((Get-ChildItem -Path $destPath -Recurse -Force | Measure-Object -Property Length -Sum).Sum / 1MB), 2)
 
-        Add-Content $log "$timestamp - Copy completed successfully. Destination now has $newCount files ($newSize MB)."
-        Write-Output "$timestamp - Copy completed successfully. Destination now has $newCount files ($newSize MB)."
+        Add-Content $log "$timestamp - [$hostname] Copy completed successfully. Destination now has $newCount files ($newSize MB)."
+        Write-Output "$timestamp - [$hostname] Copy completed successfully. Destination now has $newCount files ($newSize MB)."
     }
 
     # Disconnect from share
     net use $src /delete | Out-Null
-    Add-Content $log "$timestamp - Disconnected from $src"
+    Add-Content $log "$timestamp - [$hostname] Disconnected from $src"
+    Write-Output "$timestamp - [$hostname] Log saved at: $log"
   register: copy_result
 
 - name: Display copy or skip summary
