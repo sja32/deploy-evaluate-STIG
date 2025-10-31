@@ -1,18 +1,12 @@
 ---
 # Default values for deploy_evaluate_stig role
 
-# Network share where Evaluate-STIG resides
+# UNC path to the source Evaluate-STIG folder on the network share
 src_share: "\\\\192.168.40.42\\raw-images\\Evaluate-STIG"
 
-# Local destination root
+# Local destination root for copying the folder
 dest_root: "C:\\ProgramData"
 
-# Subfolder under ProgramData where Evaluate-STIG will be copied
-dest_path: "{{ dest_root }}\\Evaluate-STIG"
-
-# Log file path for copy operation
-copy_log: "C:\\Windows\\Temp\\evaluate_stig_copy_{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}.log"
-
-# SMB credentials for accessing the share (set in AWX, not Git)
+# SMB credentials (set via AWX Credential or extra_vars)
 smb_user: ""
 smb_pass: ""
