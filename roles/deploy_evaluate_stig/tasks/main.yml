@@ -1,53 +1,72 @@
 ---
 # ===================================================================
 # Role: deploy_evaluate_stig
-# Purpose: Copy the entire Evaluate-STIG folder from a network share
-#          to the local destination on a Windows host.
+# Purpose: Copy the entire Evaluate-STIG folder (not just its contents)
+#          from a network share to C:\ProgramData using PowerShell.
 # ===================================================================
 
-- name: Ensure destination root exists
+- name: Ensure destination root (ProgramData) exists
   ansible.windows.win_file:
     path: "{{ dest_root }}"
     state: directory
 
-- name: Copy entire Evaluate-STIG folder from network share into ProgramData
+- name: Copy full Evaluate-STIG folder from network share
   ansible.windows.win_shell: |
     $src = "{{ src_share }}"
-    $dest = "{{ dest_root }}"
+    $destRoot = "{{ dest_root }}"
+    $folderName = "Evaluate-STIG"
+    $destPath = Join-Path $destRoot $folderName
     $user = "{{ smb_user }}"
     $pass = "{{ smb_pass }}"
     $log = "{{ copy_log }}"
-
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    Add-Content $log "$timestamp Starting full folder copy from $src to $dest"
 
-    # Map the network share using provided credentials
-    net use $src /user:$user $pass
+    Add-Content $log "$timestamp - Starting full folder copy from $src to $destRoot"
+
+    # Map the network share with credentials
+    net use $src /user:$user $pass | Out-Null
+
+    # Ensure destination folder structure exists
+    if (-not (Test-Path $destPath)) {
+        New-Item -Path $destPath -ItemType Directory | Out-Null
+        Add-Content $log "$timestamp - Created destination folder: $destPath"
+    }
 
     # Copy the entire Evaluate-STIG folder (not just contents)
-    robocopy "{{ src_share }}" "{{ dest_root }}" /E /Z /R:3 /W:5 /LOG+:$log
+    $sourceParent = Split-Path $src
+    $folderToCopy = Split-Path $src -Leaf
+    $copyTarget = $destRoot
+
+    Add-Content $log "$timestamp - Copying folder $folderToCopy to $copyTarget"
+
+    # Use Copy-Item to copy the folder itself, not only contents
+    Copy-Item -Path (Join-Path $sourceParent $folderToCopy) `
+              -Destination $copyTarget `
+              -Recurse -Force -ErrorAction Stop
+
+    Add-Content $log "$timestamp - Copy completed successfully."
 
     # Unmap the network share
-    net use $src /delete
+    net use $src /delete | Out-Null
 
-    Add-Content $log "$timestamp Copy of Evaluate-STIG folder completed successfully."
+    Add-Content $log "$timestamp - Disconnected from $src"
   register: copy_result
 
-- name: Debug copy summary
+- name: Display summary
   ansible.builtin.debug:
     msg:
       - "Evaluate-STIG folder copied successfully."
-      - "Destination: {{ dest_root }}"
+      - "Destination: {{ dest_root }}\\Evaluate-STIG"
       - "Log file: {{ copy_log }}"
 
-# Optional: Verify that the folder now exists on the destination
-- name: Verify Evaluate-STIG folder exists
+# Optional: Verify that the copied folder exists
+- name: Verify Evaluate-STIG folder presence
   ansible.windows.win_stat:
     path: "{{ dest_root }}\\Evaluate-STIG"
   register: stig_folder_check
 
-- name: Display verification result
+- name: Show verification
   ansible.builtin.debug:
     msg: >-
       Folder exists: {{ stig_folder_check.stat.exists }},
-      Size (bytes): {{ stig_folder_check.stat.size | default('unknown') }}
+      Size: {{ stig_folder_check.stat.size | default('unknown') }} bytes
