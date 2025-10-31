@@ -4,28 +4,25 @@
     path: "{{ dest_root }}"
     state: directory
 
-- name: Add temporary SMB credentials (if provided)
-  ansible.windows.win_command: >
-    cmdkey /add:192.168.40.42 /user:{{ smb_user }} /pass:{{ smb_pass }}
-  when: smb_user | default('') | length > 0
-  changed_when: false
-
-- name: Copy Evaluate-STIG folder using PowerShell Copy-Item
+# Remove cmdkey usage and replace with direct SMB connection
+- name: Copy Evaluate-STIG folder from network share
   ansible.windows.win_shell: |
-    $src = "{{ src_share }}"
-    $dest = "{{ dest_path }}"
+    $src = "\\192.168.40.42\raw-images\Evaluate-STIG"
+    $dest = "{{ dest_root }}"
+    $user = "{{ smb_user }}"
+    $pass = "{{ smb_pass }}"
     $log = "{{ copy_log }}"
+
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    Add-Content $log "[$timestamp] Starting copy from $src to $dest"
-    Copy-Item -Path $src -Destination $dest -Recurse -Force -ErrorAction Stop
-    Add-Content $log "[$timestamp] Copy completed successfully."
+    Add-Content $log "$timestamp Starting copy from $src to $dest"
+
+    net use $src /user:$user $pass
+    robocopy $src $dest /E /Z /R:3 /W:5 /LOG+:$log
+    net use $src /delete
+
+    Add-Content $log "$timestamp Copy completed successfully."
   register: copy_result
 
-- name: Debug copy result (log path)
+- name: Debug copy summary
   ansible.builtin.debug:
     msg: "Evaluate-STIG copied successfully. Log saved at: {{ copy_log }}"
-
-- name: Remove temporary SMB credentials
-  ansible.windows.win_command: cmdkey /delete:192.168.40.42
-  when: smb_user | default('') | length > 0
-  changed_when: false
