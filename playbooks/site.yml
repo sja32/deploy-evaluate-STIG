@@ -1,6 +1,6 @@
 ---
 - name: Deploy Evaluate-STIG
   hosts: all
-  gather_fact: false
+  gather_facts: false
   roles:
     - role: deploy_evaluate_stig
