@@ -1,27 +1,53 @@
 ---
+# ===================================================================
+# Role: deploy_evaluate_stig
+# Purpose: Copy the entire Evaluate-STIG folder from a network share
+#          to the local destination on a Windows host.
+# ===================================================================
+
 - name: Ensure destination root exists
   ansible.windows.win_file:
     path: "{{ dest_root }}"
     state: directory
 
-- name: Copy Evaluate-STIG folder from network share
+- name: Copy entire Evaluate-STIG folder from network share into ProgramData
   ansible.windows.win_shell: |
-    $src = "\\192.168.40.42\raw-images\Evaluate-STIG"
+    $src = "{{ src_share }}"
     $dest = "{{ dest_root }}"
     $user = "{{ smb_user }}"
     $pass = "{{ smb_pass }}"
     $log = "{{ copy_log }}"
 
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    Add-Content $log "$timestamp Starting copy from $src to $dest"
+    Add-Content $log "$timestamp Starting full folder copy from $src to $dest"
 
+    # Map the network share using provided credentials
     net use $src /user:$user $pass
-    robocopy $src $dest /E /Z /R:3 /W:5 /LOG+:$log
+
+    # Copy the entire Evaluate-STIG folder (not just contents)
+    robocopy "{{ src_share }}" "{{ dest_root }}" /E /Z /R:3 /W:5 /LOG+:$log
+
+    # Unmap the network share
     net use $src /delete
 
-    Add-Content $log "$timestamp Copy completed successfully."
+    Add-Content $log "$timestamp Copy of Evaluate-STIG folder completed successfully."
   register: copy_result
 
 - name: Debug copy summary
   ansible.builtin.debug:
-    msg: "Evaluate-STIG copied successfully to {{ dest_root }}. Log saved at: {{ copy_log }}"
+    msg:
+      - "Evaluate-STIG folder copied successfully."
+      - "Destination: {{ dest_root }}"
+      - "Log file: {{ copy_log }}"
+
+# Optional: Verify that the folder now exists on the destination
+- name: Verify Evaluate-STIG folder exists
+  ansible.windows.win_stat:
+    path: "{{ dest_root }}\\Evaluate-STIG"
+  register: stig_folder_check
+
+- name: Display verification result
+  ansible.builtin.debug:
+    msg: >-
+      Folder exists: {{ stig_folder_check.stat.exists }},
+      Size (bytes): {{ stig_folder_check.stat.size | default('unknown') }}
