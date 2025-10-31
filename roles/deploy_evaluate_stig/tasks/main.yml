@@ -12,14 +12,14 @@
 
 - name: Copy or update Evaluate-STIG folder (LastWriteTime-aware)
   ansible.windows.win_shell: |
-    $src = "{{ src_share }}"
-    $destRoot = "{{ dest_root }}"
-    $folderName = "Evaluate-STIG"
+    $src = '{{ src_share }}'
+    $destRoot = '{{ dest_root }}'
+    $folderName = 'Evaluate-STIG'
     $destPath = Join-Path $destRoot $folderName
-    $user = "{{ smb_user }}"
-    $pass = "{{ smb_pass }}"
-    $log = "{{ copy_log }}"
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $user = '{{ smb_user }}'
+    $pass = '{{ smb_pass }}'
+    $log = '{{ copy_log }}'
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
     Add-Content $log "$timestamp - Starting Evaluate-STIG folder check."
 
@@ -39,7 +39,7 @@
         $destInfo = Get-Item $destPath
         $destTime = $destInfo.LastWriteTime
     } else {
-        $destTime = Get-Date "1900-01-01"
+        $destTime = Get-Date '1900-01-01'
     }
 
     Add-Content $log "$timestamp - Source last modified: $($srcTime)"
@@ -48,7 +48,45 @@
     if (-not (Test-Path $destPath)) {
         Write-Output "$timestamp - Destination folder missing. Copying new version..."
         Add-Content $log "$timestamp - Destination folder missing. Copying new version..."
-        $action = "copy"
+        $action = 'copy'
     }
     elseif ($srcTime -gt $destTime) {
-        Write-Output "$timestamp - Source is ne
+        Write-Output "$timestamp - Source is newer. Replacing destination..."
+        Add-Content $log "$timestamp - Source is newer. Replacing destination..."
+        Remove-Item -Path $destPath -Recurse -Force
+        $action = 'copy'
+    }
+    else {
+        Write-Output "$timestamp - Evaluate-STIG is already up-to-date. Skipping copy."
+        Add-Content $log "$timestamp - Evaluate-STIG is already up-to-date. Skipping copy."
+        $action = 'skip'
+    }
+
+    if ($action -eq 'copy') {
+        # Ensure destination root exists
+        if (-not (Test-Path $destRoot)) {
+            New-Item -Path $destRoot -ItemType Directory | Out-Null
+        }
+
+        # Copy full folder from share
+        $sourceParent = Split-Path $src
+        $folderToCopy = Split-Path $src -Leaf
+        $copyTarget = $destRoot
+
+        Add-Content $log "$timestamp - Copying folder $folderToCopy to $copyTarget"
+        Copy-Item -Path (Join-Path $sourceParent $folderToCopy) `
+                  -Destination $copyTarget `
+                  -Recurse -Force -ErrorAction Stop
+
+        Add-Content $log "$timestamp - Copy completed successfully."
+        Write-Output "$timestamp - Evaluate-STIG successfully copied to $copyTarget."
+    }
+
+    # Disconnect from the network share
+    net use $src /delete | Out-Null
+    Add-Content $log "$timestamp - Disconnected from $src"
+  register: copy_result
+
+- name: Display copy or skip summary
+  ansible.builtin.debug:
+    var: copy_result.stdout_lines
