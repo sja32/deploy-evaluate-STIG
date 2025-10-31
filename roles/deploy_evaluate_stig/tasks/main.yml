@@ -4,7 +4,6 @@
     path: "{{ dest_root }}"
     state: directory
 
-# Remove cmdkey usage and replace with direct SMB connection
 - name: Copy Evaluate-STIG folder from network share
   ansible.windows.win_shell: |
     $src = "\\192.168.40.42\raw-images\Evaluate-STIG"
@@ -25,4 +24,4 @@
 
 - name: Debug copy summary
   ansible.builtin.debug:
-    msg: "Evaluate-STIG copied successfully. Log saved at: {{ copy_log }}"
+    msg: "Evaluate-STIG copied successfully to {{ dest_root }}. Log saved at: {{ copy_log }}"
