@@ -56,9 +56,11 @@
         # Unmap the network share
         net use $src /delete | Out-Null
         Add-Content $log "$timestamp - Disconnected from $src"
+
+        Write-Output "$timestamp - Evaluate-STIG successfully copied to $copyTarget."
     }
   register: copy_result
 
 - name: Display copy or skip summary
   ansible.builtin.debug:
-    msg: "{{ copy_result.stdout_lines }}"
+    var: copy_result.stdout_lines
