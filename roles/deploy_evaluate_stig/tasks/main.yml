@@ -7,7 +7,7 @@
 # ===================================================================
 
 - name: Ensure destination root (ProgramData) exists
-  win_file:
+  ansible.windows.win_file:
     path: C:\ProgramData\EvaluateSTIG
     state: directory
 
