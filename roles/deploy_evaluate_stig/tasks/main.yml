@@ -7,8 +7,8 @@
 # ===================================================================
 
 - name: Ensure destination root (ProgramData) exists
-  ansible.windows.win_file:
-    path: "{{ dest_root }}"
+  win_file:
+    path: C:\ProgramData\EvaluateSTIG
     state: directory
 
 - name: Copy or update Evaluate-STIG folder (with detailed audit)
