@@ -1,6 +1,12 @@
 ---
-- name: Deploy Evaluate-STIG
-  hosts: all
-  gather_facts: false
+- name: Deploy Evaluate-STIG to Windows hosts
+  hosts: windows
+  gather_facts: no
+
+  collections:
+    - ansible.windows
+    - community.windows
+    - community.general
+
   roles:
     - role: deploy_evaluate_stig
