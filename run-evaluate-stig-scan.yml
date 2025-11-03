@@ -1,20 +1,38 @@
 ---
-# Run Evaluate-STIG scan and upload results
 - name: Run Evaluate-STIG scan and upload results
   hosts: all
   gather_facts: no
 
   vars:
-    stig_workdir: "C:\\ProgramData\\Evaluate-STIG_1.2507.5\\Evaluate-STIG"
+    stig_version: "1.2507.5"
+    stig_base: "C:\\ProgramData"
+    stig_workdir: "{{ stig_base }}\\Evaluate-STIG_{{ stig_version }}\\Evaluate-STIG"
     stig_results: "C:\\Users\\Public\\Documents\\STIG_Compliance"
+    network_share: "\\\\192.168.40.42\\raw-images\\stig-results\\{{ inventory_hostname }}"
 
   tasks:
+    ###################################################################
+    # 1️⃣ Ensure local Evaluate-STIG directory exists
+    ###################################################################
+    - name: Ensure Evaluate-STIG directory exists on remote host
+      ansible.windows.win_file:
+        path: "{{ stig_workdir }}"
+        state: directory
+
+    ###################################################################
+    # 2️⃣ Ensure PowerShell execution policy allows scripts
+    ###################################################################
     - name: Ensure execution policy allows script execution
       ansible.windows.win_shell: |
         Set-ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
         Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-      ignore_errors: yes
+      register: ep_result
+      failed_when: false
+      changed_when: false
 
+    ###################################################################
+    # 3️⃣ Run Evaluate-STIG scan
+    ###################################################################
     - name: Run Evaluate-STIG scan
       ansible.windows.win_shell: |
         try {
@@ -27,9 +45,32 @@
             exit 1
         }
 
+    ###################################################################
+    # 4️⃣ Ensure results folder exists locally before copying
+    ###################################################################
+    - name: Ensure STIG results folder exists
+      ansible.windows.win_file:
+        path: "{{ stig_results }}"
+        state: directory
+
+    ###################################################################
+    # 5️⃣ Ensure destination folder exists on network share
+    ###################################################################
+    - name: Ensure network share destination exists
+      ansible.windows.win_shell: |
+        if (-Not (Test-Path "{{ network_share }}")) {
+            New-Item -Path "{{ network_share }}" -ItemType Directory | Out-Null
+            Write-Host "Created network share folder {{ network_share }}"
+        } else {
+            Write-Host "Network share folder already exists."
+        }
+
+    ###################################################################
+    # 6️⃣ Copy results back to network share
+    ###################################################################
     - name: Copy STIG results back to network share
       ansible.windows.win_copy:
         src: "{{ stig_results }}"
-        dest: "\\\\192.168.40.42\\raw-images\\stig-results\\{{ inventory_hostname }}"
+        dest: "{{ network_share }}"
         remote_src: yes
         recurse: yes
