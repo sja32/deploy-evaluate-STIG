@@ -11,7 +11,7 @@ This playbook deploys the latest Evaluate-STIG package from a network share to W
 | Variable | Example | Description |
 |-----------|----------|-------------|
 | `smb_user` | `Billy-Butcher\svc-ansible` | SMB credential for share access |
-| `smb_pass` | `Luasi965!` | SMB password for share access |
+| `smb_pass` | `YOURSECUREPASSWORD!` | SMB password for share access |
 
 ## AWX Settings
 - **Execution Environment:** `Windows EE`
