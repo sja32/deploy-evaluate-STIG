@@ -30,7 +30,7 @@
         recurse: yes
 
     - name: Remove mapped drive (cleanup)
-      ansible.windows.win_command: net use Z: /delete /y
+      ansible.windows.win_command: "net use Z: /delete /y"
       args:
         executable: cmd.exe
       ignore_errors: yes
