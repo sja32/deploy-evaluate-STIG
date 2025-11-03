@@ -16,10 +16,8 @@
         state: directory
 
     - name: Map network share temporarily
-      ansible.windows.win_command: >
-        net use Z: {{ stig_src }} /user:"{{ smb_user }}" "{{ smb_pass }}"
-      args:
-        executable: cmd.exe
+      ansible.windows.win_shell: |
+        net use Z: "{{ stig_src }}" /user:"{{ smb_user }}" "{{ smb_pass }}"
       register: map_result
       ignore_errors: yes
 
@@ -36,8 +34,6 @@
       ignore_errors: yes
 
     - name: Remove mapped drive (cleanup)
-      ansible.windows.win_command: >
+      ansible.windows.win_shell: |
         net use Z: /delete /y
-      args:
-        executable: cmd.exe
       ignore_errors: yes
