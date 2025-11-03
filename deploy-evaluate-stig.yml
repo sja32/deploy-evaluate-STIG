@@ -1,18 +1,36 @@
 ---
 # Playbook: deploy-evaluate-stig.yml
-# Purpose: Deploy Evaluate-STIG files to Windows endpoints
+# Purpose: Deploy the latest Evaluate-STIG package from network share to Windows endpoints
 
-- name: Deploy Evaluate-STIG to ProgramData
-  hosts: all
+- name: Deploy Evaluate-STIG package
+  hosts: windows
   gather_facts: no
+  vars:
+    stig_src: '\\192.168.40.42\raw-images\Evaluate-STIG_1.2507.5'
+    stig_dest: 'C:\ProgramData\Evaluate-STIG'
   tasks:
-    - name: Ensure destination path exists
-      win_file:
-        path: C:\ProgramData\Evaluate-STIG
+    - name: Ensure destination directory exists
+      ansible.windows.win_file:
+        path: "{{ stig_dest }}"
         state: directory
 
-    - name: Copy Evaluate-STIG using PowerShell Copy-Item
-      win_shell: |
-        Copy-Item -Path "\\192.168.40.42\raw-images\Evaluate-STIG_1.2507.5\*" -Destination "C:\ProgramData\Evaluate-STIG" -Recurse -Force -Credential (New-Object System.Management.Automation.PSCredential('{{ smb_user }}',(ConvertTo-SecureString '{{ smb_pass }}' -AsPlainText -Force)))
+    - name: Map network share temporarily
+      ansible.windows.win_command: >
+        net use Z: "{{ stig_src }}" /user:"{{ smb_user }}" "{{ smb_pass }}"
       args:
-        executable: powershell.exe
+        executable: cmd.exe
+      register: map_result
+      ignore_errors: yes
+
+    - name: Copy Evaluate-STIG files to destination
+      ansible.windows.win_copy:
+        src: Z:\
+        dest: "{{ stig_dest }}"
+        remote_src: yes
+        recurse: yes
+
+    - name: Remove mapped drive (cleanup)
+      ansible.windows.win_command: net use Z: /delete /y
+      args:
+        executable: cmd.exe
+      ignore_errors: yes
