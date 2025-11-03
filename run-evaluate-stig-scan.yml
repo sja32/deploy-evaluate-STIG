@@ -1,0 +1,63 @@
+---
+# Playbook: run-evaluate-stig-scan.yml
+# Purpose: Run Evaluate-STIG scan and copy results to network share
+
+- name: Run Evaluate-STIG scan and upload results
+  hosts: all
+  gather_facts: no
+  vars:
+    stig_workdir: 'C:\ProgramData\Evaluate-STIG_1.2507.5\Evaluate-STIG'
+    stig_results_src: 'C:\Users\Public\Documents\STIG_Compliance'
+    stig_results_dest: '\\192.168.40.42\raw-images\stig-results'
+
+  tasks:
+    - name: Run Evaluate-STIG scan
+      ansible.windows.win_shell: |
+        try {
+            Write-Host "Running Evaluate-STIG scan..."
+            Set-Location "{{ stig_workdir }}"
+            .\Evaluate-STIG.ps1 -Output ckl
+            Write-Host "✅ STIG scan completed successfully."
+        }
+        catch {
+            Write-Host "❌ STIG scan failed: $($_.Exception.Message)"
+            exit 1
+        }
+      register: stig_scan_result
+      ignore_errors: no
+
+    - name: Show scan output
+      debug:
+        var: stig_scan_result.stdout_lines
+
+    - name: Copy STIG results back to network share
+      ansible.windows.win_shell: |
+        try {
+            $hostname = $env:COMPUTERNAME
+            $srcPath = Join-Path "{{ stig_results_src }}" $hostname
+            $destPath = Join-Path "{{ stig_results_dest }}" $hostname
+
+            Write-Host "Mapping network share..."
+            net use Z: "{{ stig_results_dest }}" /user:"{{ smb_user }}" "{{ smb_pass }}" | Out-Null
+
+            Write-Host "Creating destination directory..."
+            New-Item -Path $destPath -ItemType Directory -Force | Out-Null
+
+            Write-Host "Copying results from $srcPath to $destPath..."
+            Copy-Item -Path "$srcPath\*" -Destination "$destPath" -Recurse -Force -ErrorAction Stop
+
+            Write-Host "Cleaning up mapped drive..."
+            net use Z: /delete /y | Out-Null
+            Write-Host "✅ Results successfully uploaded."
+        }
+        catch {
+            Write-Host "❌ Failed to copy results: $($_.Exception.Message)"
+            net use Z: /delete /y | Out-Null
+            exit 1
+        }
+      register: upload_result
+      ignore_errors: no
+
+    - name: Show upload results
+      debug:
+        var: upload_result.stdout_lines
