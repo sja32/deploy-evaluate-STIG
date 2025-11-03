@@ -13,6 +13,6 @@
 
     - name: Copy Evaluate-STIG using PowerShell Copy-Item
       win_shell: |
-        Copy-Item -Path "\\192.168.10.200\shared\evaluate-stig\*" -Destination "C:\ProgramData\Evaluate-STIG" -Recurse -Force -Credential (New-Object System.Management.Automation.PSCredential('{{ smb_user }}',(ConvertTo-SecureString '{{ smb_pass }}' -AsPlainText -Force)))
+        Copy-Item -Path "\\192.168.40.42\raw-images\Evaluate-STIG_1.2507.5\*" -Destination "C:\ProgramData\Evaluate-STIG" -Recurse -Force -Credential (New-Object System.Management.Automation.PSCredential('{{ smb_user }}',(ConvertTo-SecureString '{{ smb_pass }}' -AsPlainText -Force)))
       args:
         executable: powershell.exe
