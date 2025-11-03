@@ -25,15 +25,10 @@
       debug:
         var: map_result.stdout_lines
 
-    - name: Copy Evaluate-STIG files to destination
+        - name: Copy Evaluate-STIG files to destination
       ansible.windows.win_copy:
-        src: Z:\
+        src: "\\\\192.168.40.42\\raw-images\\Evaluate-STIG_1.2507.5"
         dest: "{{ stig_dest }}"
         remote_src: yes
         recurse: yes
-      ignore_errors: yes
 
-    - name: Remove mapped drive (cleanup)
-      ansible.windows.win_shell: |
-        net use Z: /delete /y
-      ignore_errors: yes
