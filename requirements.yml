@@ -1,9 +1,0 @@
----
-collections:
-  - name: ansible.windows
-  - name: community.windows
-  - name: ansible.utils
-  - name: community.general
-roles:
-  - name: deploy_evaluate_stig
-    src: ./roles/deploy_evaluate_stig
