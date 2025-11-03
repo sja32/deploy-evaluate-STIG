@@ -1,7 +1,7 @@
 ---
 # Playbook: run-evaluate-stig-scan.yml
-# Purpose: Run Evaluate-STIG scan on all Windows hosts and upload results
-#          to Synology SMB share, using hostname-only folders.
+# Purpose: Run Evaluate-STIG scan and upload results to Synology SMB share
+#          (hostname-only folders, reliable copy process)
 
 - name: Run Evaluate-STIG scan and upload results
   hosts: all
@@ -11,14 +11,12 @@
     stig_workdir: "C:\\ProgramData\\Evaluate-STIG_1.2507.5\\Evaluate-STIG"
     stig_results: "C:\\Users\\Public\\Documents\\STIG_Compliance"
     smb_share_root: "\\\\192.168.40.42\\raw-images"
-
-    # Use AWX-injected environment variables for Synology SMB credentials
     smb_user: "{{ lookup('env', 'SMB_SHARE_SYNOLOGY_NEW_USERNAME') }}"
     smb_pass: "{{ lookup('env', 'SMB_SHARE_SYNOLOGY_NEW_PASSWORD') }}"
 
   tasks:
     ###################################################################
-    # 1️⃣ Ensure the Evaluate-STIG working directory exists
+    # 1️⃣ Ensure working directory exists
     ###################################################################
     - name: Ensure Evaluate-STIG working directory exists
       ansible.windows.win_file:
@@ -26,7 +24,7 @@
         state: directory
 
     ###################################################################
-    # 2️⃣ Run Evaluate-STIG PowerShell scan
+    # 2️⃣ Run Evaluate-STIG scan
     ###################################################################
     - name: Run Evaluate-STIG scan
       ansible.windows.win_shell: |
@@ -38,10 +36,9 @@
         .\\Evaluate-STIG.ps1 -Output ckl
         Write-Host "✅ STIG scan completed successfully."
       register: stig_scan_result
-      ignore_errors: no
 
     ###################################################################
-    # 3️⃣ Ensure local results directory exists
+    # 3️⃣ Ensure local STIG results folder exists
     ###################################################################
     - name: Ensure local STIG results directory exists
       ansible.windows.win_file:
@@ -49,45 +46,40 @@
         state: directory
 
     ###################################################################
-    # 4️⃣ Map Synology SMB share using AWX credentials
+    # 4️⃣ Copy results directly to SMB share using same PowerShell session
     ###################################################################
-    - name: Map SMB share with provided credentials
+    - name: Copy STIG results to Synology share (single-session mapping)
       ansible.windows.win_shell: |
         $username = "{{ smb_user }}"
         $password = "{{ smb_pass }}"
         $secure = ConvertTo-SecureString $password -AsPlainText -Force
         $cred = New-Object System.Management.Automation.PSCredential ($username, $secure)
-        if (Get-PSDrive Z -ErrorAction SilentlyContinue) { Remove-PSDrive -Name Z -Force }
-        New-PSDrive -Name "Z" -PSProvider FileSystem -Root "{{ smb_share_root }}" -Credential $cred -ErrorAction Stop
-      register: map_result
-      changed_when: "'The command completed successfully' in map_result.stdout or map_result.rc == 0"
 
-    ###################################################################
-    # 5️⃣ Copy results to per-host folder on share (no timestamp)
-    ###################################################################
-    - name: Copy STIG results to mapped share
-      ansible.windows.win_shell: |
         $src = "{{ stig_results }}"
-        $dest = "Z:\\stig-results\\{{ inventory_hostname }}"
-        if (-not (Test-Path $dest)) {
-            New-Item -Path $dest -ItemType Directory | Out-Null
+        $dest = "{{ smb_share_root }}\\stig-results\\{{ inventory_hostname }}"
+
+        Write-Host "Mapping $dest..."
+        New-PSDrive -Name "Z" -PSProvider FileSystem -Root "{{ smb_share_root }}" -Credential $cred -ErrorAction Stop | Out-Null
+
+        if (-not (Test-Path "Z:\\stig-results")) {
+            New-Item -Path "Z:\\stig-results" -ItemType Directory | Out-Null
         }
-        Copy-Item -Path "$src\\*" -Destination $dest -Recurse -Force
+        if (-not (Test-Path "Z:\\stig-results\\{{ inventory_hostname }}")) {
+            New-Item -Path "Z:\\stig-results\\{{ inventory_hostname }}" -ItemType Directory | Out-Null
+        }
+
+        Write-Host "Copying results from $src to $dest..."
+        Copy-Item -Path "$src\\*" -Destination "Z:\\stig-results\\{{ inventory_hostname }}" -Recurse -Force
+
         Write-Host "✅ Results copied successfully to $dest"
-      register: copy_result
-      ignore_errors: yes
 
-    ###################################################################
-    # 6️⃣ Always unmap the drive (cleanup)
-    ###################################################################
-    - name: Cleanup mapped SMB drive
-      ansible.windows.win_shell: |
+        # Clean up mapping
         Remove-PSDrive -Name "Z" -Force -ErrorAction SilentlyContinue
-      when: map_result is defined
-      ignore_errors: yes
+      register: copy_result
+      ignore_errors: no
 
     ###################################################################
-    # 7️⃣ Display completion summary
+    # 5️⃣ Display summary
     ###################################################################
     - name: Display completion summary
       debug:
