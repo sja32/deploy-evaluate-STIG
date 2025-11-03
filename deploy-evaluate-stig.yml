@@ -15,20 +15,28 @@
         path: "{{ stig_dest }}"
         state: directory
 
-    - name: Map network share temporarily
+    - name: Map, copy, and unmap using PowerShell only
       ansible.windows.win_shell: |
-        net use Z: "{{ stig_src }}" /user:"{{ smb_user }}" "{{ smb_pass }}"
-      register: map_result
-      ignore_errors: yes
+        try {
+            Write-Host "Mapping network share..."
+            net use Z: "{{ stig_src }}" /user:"{{ smb_user }}" "{{ smb_pass }}" | Out-Null
 
-    - name: Debug share mapping
+            Write-Host "Copying files to {{ stig_dest }}..."
+            Copy-Item -Path "Z:\*" -Destination "{{ stig_dest }}" -Recurse -Force -ErrorAction Stop
+
+            Write-Host "Cleaning up mapped drive..."
+            net use Z: /delete /y | Out-Null
+
+            Write-Host "✅ Evaluate-STIG deployment complete."
+        }
+        catch {
+            Write-Host "❌ Deployment failed: $($_.Exception.Message)"
+            net use Z: /delete /y | Out-Null
+            exit 1
+        }
+      register: ps_result
+      ignore_errors: no
+
+    - name: Show PowerShell output
       debug:
-        var: map_result.stdout_lines
-
-        - name: Copy Evaluate-STIG files to destination
-      ansible.windows.win_copy:
-        src: "\\\\192.168.40.42\\raw-images\\Evaluate-STIG_1.2507.5"
-        dest: "{{ stig_dest }}"
-        remote_src: yes
-        recurse: yes
-
+        var: ps_result.stdout_lines
