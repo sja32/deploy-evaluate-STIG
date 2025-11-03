@@ -1,76 +1,97 @@
 ---
+# Playbook: run-evaluate-stig-scan.yml
+# Purpose: Run Evaluate-STIG PowerShell scan on each Windows host
+#          and copy results to Synology SMB share automatically.
+
 - name: Run Evaluate-STIG scan and upload results
-  hosts: all
+  hosts: windows
   gather_facts: no
 
   vars:
-    stig_version: "1.2507.5"
-    stig_base: "C:\\ProgramData"
-    stig_workdir: "{{ stig_base }}\\Evaluate-STIG_{{ stig_version }}\\Evaluate-STIG"
+    stig_workdir: "C:\\ProgramData\\Evaluate-STIG_1.2507.5\\Evaluate-STIG"
     stig_results: "C:\\Users\\Public\\Documents\\STIG_Compliance"
-    network_share: "\\\\192.168.40.42\\raw-images\\stig-results\\{{ inventory_hostname }}"
+    smb_share_root: "\\\\192.168.40.42\\raw-images"
+
+    # Pull SMB credential values from AWX environment
+    smb_user: "{{ lookup('env', 'SMB_SHARE_SYNOLOGY_NEW_USERNAME') }}"
+    smb_pass: "{{ lookup('env', 'SMB_SHARE_SYNOLOGY_NEW_PASSWORD') }}"
 
   tasks:
     ###################################################################
-    # 1️⃣ Ensure local Evaluate-STIG directory exists
+    # 1️⃣ Ensure the Evaluate-STIG directory exists
     ###################################################################
-    - name: Ensure Evaluate-STIG directory exists on remote host
+    - name: Ensure Evaluate-STIG working directory exists
       ansible.windows.win_file:
         path: "{{ stig_workdir }}"
         state: directory
 
     ###################################################################
-    # 2️⃣ Ensure PowerShell execution policy allows scripts
-    ###################################################################
-    - name: Ensure execution policy allows script execution
-      ansible.windows.win_shell: |
-        Set-ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
-        Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-      register: ep_result
-      failed_when: false
-      changed_when: false
-
-    ###################################################################
-    # 3️⃣ Run Evaluate-STIG scan
+    # 2️⃣ Run Evaluate-STIG PowerShell scan
     ###################################################################
     - name: Run Evaluate-STIG scan
       ansible.windows.win_shell: |
-        try {
-            Write-Host "Running Evaluate-STIG scan..."
-            Set-Location "{{ stig_workdir }}"
-            powershell.exe -ExecutionPolicy Bypass -File .\Evaluate-STIG.ps1 -Output ckl
-            Write-Host "✅ STIG scan completed successfully."
-        } catch {
-            Write-Host "❌ STIG scan failed: $($_.Exception.Message)"
-            exit 1
+        Write-Host "Running Evaluate-STIG scan..."
+        if (-not (Test-Path "{{ stig_workdir }}\\Evaluate-STIG.ps1")) {
+            throw "Evaluate-STIG.ps1 not found in {{ stig_workdir }}"
         }
+        Set-Location "{{ stig_workdir }}"
+        .\\Evaluate-STIG.ps1 -Output ckl
+        Write-Host "✅ STIG scan completed successfully."
+      register: stig_scan_result
+      ignore_errors: no
 
     ###################################################################
-    # 4️⃣ Ensure results folder exists locally before copying
+    # 3️⃣ Ensure results directory exists locally
     ###################################################################
-    - name: Ensure STIG results folder exists
+    - name: Ensure local STIG results directory exists
       ansible.windows.win_file:
         path: "{{ stig_results }}"
         state: directory
 
     ###################################################################
-    # 5️⃣ Ensure destination folder exists on network share
+    # 4️⃣ Map Synology SMB share using AWX credentials
     ###################################################################
-    - name: Ensure network share destination exists
+    - name: Map SMB share with provided credentials
       ansible.windows.win_shell: |
-        if (-Not (Test-Path "{{ network_share }}")) {
-            New-Item -Path "{{ network_share }}" -ItemType Directory | Out-Null
-            Write-Host "Created network share folder {{ network_share }}"
-        } else {
-            Write-Host "Network share folder already exists."
-        }
+        $username = "{{ smb_user }}"
+        $password = "{{ smb_pass }}"
+        $secure = ConvertTo-SecureString $password -AsPlainText -Force
+        $cred = New-Object System.Management.Automation.PSCredential ($username, $secure)
+        if (Get-PSDrive Z -ErrorAction SilentlyContinue) { Remove-PSDrive -Name Z -Force }
+        New-PSDrive -Name "Z" -PSProvider FileSystem -Root "{{ smb_share_root }}" -Credential $cred -ErrorAction Stop
+      register: map_result
+      changed_when: "'The command completed successfully' in map_result.stdout or map_result.rc == 0"
 
     ###################################################################
-    # 6️⃣ Copy results back to network share
+    # 5️⃣ Copy results to per-host folder on share
     ###################################################################
-    - name: Copy STIG results back to network share
-      ansible.windows.win_copy:
-        src: "{{ stig_results }}"
-        dest: "{{ network_share }}"
-        remote_src: yes
-        recurse: yes
+    - name: Copy STIG results to mapped share
+      ansible.windows.win_shell: |
+        $src = "{{ stig_results }}"
+        $dest = "Z:\\stig-results\\{{ inventory_hostname }}"
+        if (-not (Test-Path $dest)) {
+            New-Item -Path $dest -ItemType Directory | Out-Null
+        }
+        Copy-Item -Path "$src\\*" -Destination $dest -Recurse -Force
+        Write-Host "✅ Results copied successfully to $dest"
+      register: copy_result
+      ignore_errors: yes
+
+    ###################################################################
+    # 6️⃣ Always unmap the drive, even on failure
+    ###################################################################
+    - name: Cleanup mapped SMB drive
+      ansible.windows.win_shell: |
+        Remove-PSDrive -Name "Z" -Force -ErrorAction SilentlyContinue
+      when: map_result is defined
+      ignore_errors: yes
+
+    ###################################################################
+    # 7️⃣ Display completion summary
+    ###################################################################
+    - name: Display completion summary
+      debug:
+        msg:
+          - "STIG scan completed on {{ inventory_hostname }}"
+          - "{{ stig_scan_result.stdout | default('No output captured') }}"
+          - "Results copied to \\\\192.168.40.42\\raw-images\\stig-results\\{{ inventory_hostname }}"
