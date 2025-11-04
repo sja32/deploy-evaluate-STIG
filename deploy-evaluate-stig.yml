@@ -1,13 +1,18 @@
 ---
 # Playbook: deploy-evaluate-stig.yml
-# Purpose: Deploy the latest Evaluate-STIG package from a network share to Windows endpoints
+# Purpose: Deploy the latest Evaluate-STIG package from network share to Windows endpoints
+# Notes: Uses secure PowerShell mapping (New-PSDrive) and version variable
 
 - name: Deploy Evaluate-STIG package
   hosts: all
   gather_facts: no
+
   vars:
-    stig_src: '\\192.168.40.42\raw-images\Evaluate-STIG_1.2507.5'
-    stig_dest: 'C:\ProgramData\Evaluate-STIG_1.2507.5'
+    stig_version: "1.2507.5"
+    stig_src: "\\\\192.168.40.42\\raw-images\\Evaluate-STIG_{{ stig_version }}"
+    stig_dest: "C:\\ProgramData\\Evaluate-STIG_{{ stig_version }}"
+    smb_user: "{{ lookup('env', 'SMB_SHARE_SYNOLOGY_NEW_USERNAME') }}"
+    smb_pass: "{{ lookup('env', 'SMB_SHARE_SYNOLOGY_NEW_PASSWORD') }}"
 
   tasks:
     - name: Ensure destination directory exists
@@ -15,23 +20,28 @@
         path: "{{ stig_dest }}"
         state: directory
 
-    - name: Map, copy, and unmap using PowerShell only
+    - name: Map, copy, and unmap securely in PowerShell
       ansible.windows.win_shell: |
         try {
-            Write-Host "Mapping network share..."
-            net use Z: "{{ stig_src }}" /user:"{{ smb_user }}" "{{ smb_pass }}" | Out-Null
+            Write-Host "Mapping {{ stig_src }}..."
+            $username = "{{ smb_user }}"
+            $password = "{{ smb_pass }}"
+            $secure = ConvertTo-SecureString $password -AsPlainText -Force
+            $cred = New-Object System.Management.Automation.PSCredential ($username, $secure)
+
+            New-PSDrive -Name "Z" -PSProvider FileSystem -Root "{{ stig_src }}" -Credential $cred -ErrorAction Stop | Out-Null
 
             Write-Host "Copying files to {{ stig_dest }}..."
-            Copy-Item -Path "Z:\*" -Destination "{{ stig_dest }}" -Recurse -Force -ErrorAction Stop
+            Copy-Item -Path "Z:\\*" -Destination "{{ stig_dest }}" -Recurse -Force -ErrorAction Stop
 
             Write-Host "Cleaning up mapped drive..."
-            net use Z: /delete /y | Out-Null
+            Remove-PSDrive -Name "Z" -Force -ErrorAction SilentlyContinue
 
-            Write-Host "✅ Evaluate-STIG deployment complete."
+            Write-Host "✅ Evaluate-STIG {{ stig_version }} deployment complete."
         }
         catch {
             Write-Host "❌ Deployment failed: $($_.Exception.Message)"
-            net use Z: /delete /y | Out-Null
+            Remove-PSDrive -Name "Z" -Force -ErrorAction SilentlyContinue
             exit 1
         }
       register: ps_result
