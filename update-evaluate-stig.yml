@@ -1,0 +1,82 @@
+---
+# Playbook: update-evaluate-stig.yml
+# Purpose: Remove older Evaluate-STIG builds and deploy the latest package
+#          from network share to all Windows endpoints.
+
+- name: Update Evaluate-STIG package on Windows endpoints
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Update these when a new version is released
+    stig_version: "1.2507.5"
+    stig_share: "\\\\192.168.40.42\\raw-images\\Evaluate-STIG_{{ stig_version }}"
+    stig_install_root: "C:\\ProgramData"
+    stig_install_path: "{{ stig_install_root }}\\Evaluate-STIG_{{ stig_version }}"
+    stig_pattern: "Evaluate-STIG_*"
+
+    # Use AWX-injected credentials for Synology share
+    smb_user: "{{ lookup('env', 'SMB_SHARE_SYNOLOGY_NEW_USERNAME') }}"
+    smb_pass: "{{ lookup('env', 'SMB_SHARE_SYNOLOGY_NEW_PASSWORD') }}"
+
+  tasks:
+    ###################################################################
+    # 1️⃣ Remove old Evaluate-STIG versions (keep only the target version)
+    ###################################################################
+    - name: Find all existing Evaluate-STIG folders
+      ansible.windows.win_find:
+        paths: "{{ stig_install_root }}"
+        patterns: "{{ stig_pattern }}"
+        file_type: directory
+      register: found_stig_dirs
+
+    - name: Remove outdated Evaluate-STIG folders
+      ansible.windows.win_file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ found_stig_dirs.files | selectattr('path', 'ne', stig_install_path) | list }}"
+      when: found_stig_dirs.matched > 0
+      ignore_errors: yes
+
+    ###################################################################
+    # 2️⃣ Ensure target directory exists for new version
+    ###################################################################
+    - name: Ensure target Evaluate-STIG folder exists
+      ansible.windows.win_file:
+        path: "{{ stig_install_path }}"
+        state: directory
+
+    ###################################################################
+    # 3️⃣ Map SMB share and copy new Evaluate-STIG build
+    ###################################################################
+    - name: Copy new Evaluate-STIG package from Synology share
+      ansible.windows.win_shell: |
+        $username = "{{ smb_user }}"
+        $password = "{{ smb_pass }}"
+        $secure = ConvertTo-SecureString $password -AsPlainText -Force
+        $cred = New-Object System.Management.Automation.PSCredential ($username, $secure)
+
+        Write-Host "Mapping {{ stig_share }}..."
+        New-PSDrive -Name "Z" -PSProvider FileSystem -Root "{{ stig_share }}" -Credential $cred -ErrorAction Stop | Out-Null
+
+        Write-Host "Copying Evaluate-STIG_{{ stig_version }} to {{ stig_install_path }}..."
+        Copy-Item -Path "Z:\\*" -Destination "{{ stig_install_path }}" -Recurse -Force
+
+        Remove-PSDrive -Name "Z" -Force -ErrorAction SilentlyContinue
+        Write-Host "✅ Evaluate-STIG_{{ stig_version }} successfully deployed."
+      register: copy_result
+      ignore_errors: no
+
+    ###################################################################
+    # 4️⃣ Validate installation
+    ###################################################################
+    - name: Verify Evaluate-STIG.ps1 exists in new directory
+      ansible.windows.win_stat:
+        path: "{{ stig_install_path }}\\Evaluate-STIG\\Evaluate-STIG.ps1"
+      register: verify_script
+
+    - name: Confirm deployment success
+      debug:
+        msg:
+          - "✅ Evaluate-STIG {{ stig_version }} deployed successfully to {{ stig_install_path }}"
+          - "Script found: {{ verify_script.stat.exists | ternary('Yes', 'No') }}"
