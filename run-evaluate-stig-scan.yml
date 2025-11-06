@@ -1,22 +1,19 @@
 ---
-# Playbook: run-evaluate-stig-scan.yml
-# Purpose: Run Evaluate-STIG scan and upload results to Synology SMB share
-#          (hostname-only folders, reliable copy process)
-
 - name: Run Evaluate-STIG scan and upload results
-  hosts: all
+  hosts: domain_controllers
   gather_facts: no
 
   vars:
     stig_workdir: "C:\\ProgramData\\Evaluate-STIG_1.2507.5\\Evaluate-STIG"
     stig_results: "C:\\Users\\Public\\Documents\\STIG_Compliance"
-    smb_share_root: "\\\\192.168.40.42\\raw-images"
-    smb_user: "{{ lookup('env', 'SMB_SHARE_SYNOLOGY_NEW_USERNAME') }}"
-    smb_pass: "{{ lookup('env', 'SMB_SHARE_SYNOLOGY_NEW_PASSWORD') }}"
+    smb_share_root: "\\\\192.168.10.198\\stig-results"
+    smb_user: "voughtnet\\svc-ansible"
+    smb_pass: "Luasi965!"
 
   tasks:
+
     ###################################################################
-    # 1️⃣ Ensure working directory exists
+    # Ensure working directory exists
     ###################################################################
     - name: Ensure Evaluate-STIG working directory exists
       ansible.windows.win_file:
@@ -24,7 +21,7 @@
         state: directory
 
     ###################################################################
-    # 2️⃣ Run Evaluate-STIG scan
+    # Run Evaluate-STIG scan (CKL only)
     ###################################################################
     - name: Run Evaluate-STIG scan
       ansible.windows.win_shell: |
@@ -33,57 +30,62 @@
             throw "Evaluate-STIG.ps1 not found in {{ stig_workdir }}"
         }
         Set-Location "{{ stig_workdir }}"
-        .\\Evaluate-STIG.ps1 -Output ckl
+        .\Evaluate-STIG.ps1 -Output ckl
         Write-Host "✅ STIG scan completed successfully."
+      args:
+        executable: PowerShell.exe
       register: stig_scan_result
 
     ###################################################################
-    # 3️⃣ Ensure local STIG results folder exists
+    # Ensure local STIG results folder exists
     ###################################################################
-    - name: Ensure local STIG results directory exists
+    - name: Ensure local results directory exists
       ansible.windows.win_file:
         path: "{{ stig_results }}"
         state: directory
 
     ###################################################################
-    # 4️⃣ Copy results directly to SMB share using same PowerShell session
+    # Create hostname-specific folder on SMB Share
     ###################################################################
-    - name: Copy STIG results to Synology share (single-session mapping)
+    - name: Create hostname folder on SMB share
       ansible.windows.win_shell: |
-        $username = "{{ smb_user }}"
-        $password = "{{ smb_pass }}"
-        $secure = ConvertTo-SecureString $password -AsPlainText -Force
-        $cred = New-Object System.Management.Automation.PSCredential ($username, $secure)
+        $sec = ConvertTo-SecureString '{{ smb_pass }}' -AsPlainText -Force
+        $cred = New-Object System.Management.Automation.PSCredential ('{{ smb_user }}', $sec)
+
+        New-PSDrive -Name R -PSProvider FileSystem -Root '{{ smb_share_root }}' -Credential $cred -ErrorAction Stop | Out-Null
+
+        if (-not (Test-Path "R:\{{ inventory_hostname }}")) {
+            New-Item -ItemType Directory -Path "R:\{{ inventory_hostname }}" | Out-Null
+        }
+
+        Remove-PSDrive -Name R -Force -ErrorAction SilentlyContinue
+      args:
+        executable: PowerShell.exe
+
+    ###################################################################
+    # Upload Entire Results Folder to SMB Share
+    ###################################################################
+    - name: Upload entire STIG_Compliance folder to share
+      ansible.windows.win_shell: |
+        $sec = ConvertTo-SecureString '{{ smb_pass }}' -AsPlainText -Force
+        $cred = New-Object System.Management.Automation.PSCredential ('{{ smb_user }}', $sec)
+
+        New-PSDrive -Name R -PSProvider FileSystem -Root '{{ smb_share_root }}' -Credential $cred -ErrorAction Stop | Out-Null
 
         $src = "{{ stig_results }}"
-        $dest = "{{ smb_share_root }}\\stig-results\\{{ inventory_hostname }}"
+        $dest = "R:\{{ inventory_hostname }}"
 
-        Write-Host "Mapping $dest..."
-        New-PSDrive -Name "Z" -PSProvider FileSystem -Root "{{ smb_share_root }}" -Credential $cred -ErrorAction Stop | Out-Null
+        Copy-Item "$src\*" "$dest" -Recurse -Force
 
-        if (-not (Test-Path "Z:\\stig-results")) {
-            New-Item -Path "Z:\\stig-results" -ItemType Directory | Out-Null
-        }
-        if (-not (Test-Path "Z:\\stig-results\\{{ inventory_hostname }}")) {
-            New-Item -Path "Z:\\stig-results\\{{ inventory_hostname }}" -ItemType Directory | Out-Null
-        }
-
-        Write-Host "Copying results from $src to $dest..."
-        Copy-Item -Path "$src\\*" -Destination "Z:\\stig-results\\{{ inventory_hostname }}" -Recurse -Force
-
-        Write-Host "✅ Results copied successfully to $dest"
-
-        # Clean up mapping
-        Remove-PSDrive -Name "Z" -Force -ErrorAction SilentlyContinue
-      register: copy_result
-      ignore_errors: no
+        Remove-PSDrive -Name R -Force -ErrorAction SilentlyContinue
+      args:
+        executable: PowerShell.exe
 
     ###################################################################
-    # 5️⃣ Display summary
+    # Summary Output
     ###################################################################
-    - name: Display completion summary
+    - name: Display Summary
       debug:
         msg:
-          - "STIG scan completed on {{ inventory_hostname }}"
-          - "{{ stig_scan_result.stdout | default('No output captured') }}"
-          - "Results copied to: \\\\192.168.40.42\\raw-images\\stig-results\\{{ inventory_hostname }}"
+          - "✅ STIG Scan completed on {{ inventory_hostname }}"
+          - "📤 Results uploaded to: {{ smb_share_root }}\\{{ inventory_hostname }}"
